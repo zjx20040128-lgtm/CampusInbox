@@ -1,0 +1,1 @@
+# Basic mode needs Python 3.10+ only; no pip dependency is required.

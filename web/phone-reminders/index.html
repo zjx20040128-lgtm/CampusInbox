@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#245b48"><title>CampusInbox · 手机提醒</title><link rel="stylesheet" href="/phone.css"><link rel="manifest" href="/manifest.webmanifest"><script src="/phone.js" defer></script><script src="/push.js" defer></script></head>
+<body><main>
+<header><span class="brand">CI · CampusInbox</span><span class="tag">电脑 → 手机</span></header>
+<h1>接收电脑提醒</h1>
+<p class="boundary">电脑保持运行。开启后台提醒后，可关闭手机页面接收通知。</p>
+<section class="card" aria-labelledby="connectionTitle"><h2 id="connectionTitle">连接这台电脑</h2>
+<p id="connectionStatus" role="status">尚未配对</p>
+<form id="pairForm"><label for="pairCode">电脑页面的 6 位配对码</label><input id="pairCode" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required placeholder="6 位数字">
+<label for="phoneName">这台手机的名称</label><input id="phoneName" name="name" maxlength="80" required value="我的手机">
+<button id="connect" class="primary" type="submit">连接并开始接收</button></form>
+<div class="actions"><button id="toggleReceive" type="button" hidden>停止接收</button><button id="disconnect" type="button" hidden>断开配对</button><button id="soundToggle" type="button">提示音：关</button></div>
+<p class="hint">在电脑“手机连接”生成配对码（5分钟有效、限用一次）。任务在电脑上核对。</p>
+<p id="notice" class="notice" role="status" hidden></p></section>
+<section class="card"><h2>后台通知</h2><button id="backgroundPush" type="button" hidden>开启后台提醒</button><p id="pushHint" class="hint">正在检查浏览器支持…</p></section>
+<section aria-labelledby="historyTitle"><div class="history-heading"><h2 id="historyTitle">提醒记录</h2><span>最近 100 条</span></div><div id="history" aria-live="polite"><p class="empty">连接后，新提醒会显示在这里。</p></div></section>
+<footer>同一 Wi-Fi · 数据保存在电脑及浏览器</footer>
+</main></body></html>

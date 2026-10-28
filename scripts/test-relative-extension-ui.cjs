@@ -1,0 +1,26 @@
+'use strict';
+const assert=require('node:assert/strict'),{chromium}=require('playwright');
+const {createTestServer}=require('./lib/browser-test-server.cjs');
+const server=createTestServer('campusinbox-relative-extension-');let browser;
+(async()=>{
+ const {url,api}=await server.start();
+ const create=async title=>{const r=await api('messages',{text:title+'：请提交报告，截止2026年10月30日18:00。',course:'数据库',scope:'一班',captured_at:'2026-10-23T10:00:00+08:00',mode:'rules'});return api('proposals/'+r.proposals[0].id+'/confirm',{})};
+ const task=await create('实验一');
+ const notice=await api('messages',{text:'上次报告再延三天',course:'数据库',scope:'一班',captured_at:'2026-10-25T10:00:00+08:00',mode:'rules'});
+ assert.equal((await api('tasks/'+task.id)).deadline,'2026-10-30T18:00:00+08:00');
+ browser=await chromium.launch({channel:'msedge',headless:true});const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(url+'/#inbox');const card=page.locator('[data-proposal="'+notice.proposals[0].id+'"]');await card.waitFor();
+ assert.match(await card.locator('.relative-deadline-summary').innerText(),/2026.*10.*30.*3天.*2026.*11.*02/);
+ assert.equal(await card.locator('[data-field="deadline"]').inputValue(),'2026-11-02T18:00');
+ await card.locator('[data-confirm]').click();await card.waitFor({state:'detached'});
+ assert.equal((await api('tasks/'+task.id)).deadline,'2026-11-02T18:00:00+08:00');
+ const duplicate=await api('messages',{text:'报告顺延3天',source:'另一来源',course:'数据库',scope:'一班',captured_at:'2026-10-25T10:00:00+08:00',mode:'rules'});
+ await page.reload();const replay=page.locator('[data-proposal="'+duplicate.proposals[0].id+'"]');await replay.waitFor();assert.match(await replay.locator('.relative-deadline-summary').innerText(),/不再重复累加/);
+ await replay.locator('[data-confirm]').click();await replay.waitFor({state:'detached'});assert.equal((await api('tasks/'+task.id)).deadline,'2026-11-02T18:00:00+08:00');
+ await create('实验二');const ambiguous=await api('messages',{text:'上次报告再延三天',course:'数据库',scope:'一班',captured_at:'2026-10-26T10:00:00+08:00',mode:'rules'});
+ await page.setViewportSize({width:390,height:844});await page.reload();const pending=page.locator('[data-proposal="'+ambiguous.proposals[0].id+'"]');await pending.waitFor();
+ await pending.locator('.relative-deadline-options>summary').click();assert.equal(await pending.locator('.relative-deadline-options [data-detail]').count(),2);assert.equal(await pending.locator('[data-confirm]').isDisabled(),true);
+ assert.equal((await api('tasks')).length,2);assert.deepEqual(errors,[]);
+ assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
+ console.log('PASS relative calculation, human confirmation, replay idempotence, ambiguous candidates and 390px layout');
+})().catch(e=>{console.error(e);process.exitCode=1}).finally(async()=>{await browser?.close();await server.close()});

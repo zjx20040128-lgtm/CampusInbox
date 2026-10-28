@@ -1,0 +1,2 @@
+# Optional browser background delivery. Basic LAN reminders remain dependency-free.
+pywebpush==2.5.0

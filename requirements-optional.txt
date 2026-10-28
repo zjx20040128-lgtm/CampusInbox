@@ -1,0 +1,4 @@
+# Optional text-PDF extraction
+pypdf>=5.0,<7.0
+# Optional screenshot fixture generation for verification (not needed for runtime OCR)
+Pillow>=11.0,<13.0

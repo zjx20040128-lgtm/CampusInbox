@@ -1,0 +1,4 @@
+package android.database.sqlite;
+import android.content.ContentValues;import android.database.Cursor;
+/** These state/permission tests do not emulate SQL. Delivery persistence policy has its own journal tests. */
+public class SQLiteDatabase {public void execSQL(String sql){throw new UnsupportedOperationException();}public Cursor rawQuery(String sql,String[] args){throw new UnsupportedOperationException();}public long insertOrThrow(String table,String nullColumn,ContentValues values){throw new UnsupportedOperationException();}public void beginTransaction(){throw new UnsupportedOperationException();}public void setTransactionSuccessful(){throw new UnsupportedOperationException();}public void endTransaction(){throw new UnsupportedOperationException();}public int update(String table,ContentValues values,String where,String[] args){throw new UnsupportedOperationException();}}

@@ -1,0 +1,12 @@
+services:
+  courseinbox:
+    build: .
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - courseinbox-data:/app/data
+    environment:
+      CI_MODEL_PROVIDER: rules
+    restart: unless-stopped
+volumes:
+  courseinbox-data:

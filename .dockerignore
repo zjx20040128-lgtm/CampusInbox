@@ -1,0 +1,8 @@
+data/
+.env
+.git/
+.superpowers/
+artifacts/
+android/
+__pycache__/
+*.pyc

@@ -1,0 +1,24 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('fs'),{chromium}=require('playwright');
+const {ChatCollector}=require('../desktop-sync/chat.cjs');
+const {installLiveCapture}=require('../desktop-sync/live-capture.cjs');
+let browser;
+(async()=>{
+ browser=await chromium.launch({channel:'msedge',headless:true});const context=await browser.newContext(),events=[];
+ await installLiveCapture(context,event=>events.push(event));
+ await context.route('https://fe.chaoxing.com/**',route=>route.fulfill({contentType:'text/html; charset=utf-8',body:`<div class="conversation-list"><div class="conversation-item is-selected" data-id="test"><span class="name">测试</span></div></div><div class="chat-header"><span class="chat-name">测试</span></div><div class="message-area"><div class="time-stamp">10-25 14:23</div><div class="message-row is-other" data-msg-id="sign1"><div class="message-avatar"><img class="avatar-img"></div><span class="sender-name">老师</span><div class="msg-attachment"><attachment-item></attachment-item></div></div></div><script>document.querySelector('attachment-item').attachShadow({mode:'open'}).innerHTML='<style>.hide{display:none}</style><div class="attach-item" attachment-type="15"><div class="attach-info"><h1>签到码签到</h1><p>10-25 14:24</p></div></div>';</script>`}));
+ const jobs=[],collector=new ChatCollector({context,accepted:new Set(),isCurrent:()=>true,onMessage:job=>jobs.push(job),onStatus:()=>{}});
+ await collector.sweep();assert.equal(jobs.length,1,'a Shadow DOM sign-in card must be captured');
+ assert.equal(jobs[0].text,'签到码签到');assert.equal(jobs[0].captured_at,'2026-10-25T14:24:00+08:00');assert.equal(jobs[0].direction,'received');
+ assert.equal(jobs[0].activity_type,'checkin');
+ const page=collector.page;await page.waitForTimeout(1000);events.length=0;
+ await page.evaluate(()=>document.querySelector('attachment-item').shadowRoot.querySelector('h1').textContent='二维码签到');
+ await page.waitForTimeout(1200);assert(events.some(e=>e.kind==='chat'),'shadow content updates trigger capture');
+ await page.evaluate(()=>document.querySelector('attachment-item').shadowRoot.querySelector('h1').textContent='周二课堂签到');
+ const custom=await page.evaluate(()=>CourseInboxChaoxing.extractDocument(document));assert.equal(custom[0].text,'周二课堂签到');assert.equal(custom[0].activity_type,'checkin');
+ await page.evaluate(()=>document.querySelector('.message-row').insertAdjacentHTML('beforeend','<div class="bubble-text"> </div>'));
+ const emptyBubble=await page.evaluate(()=>CourseInboxChaoxing.extractDocument(document));assert.equal(emptyBubble[0]?.activity_type,'checkin','an empty bubble must not hide card provenance');
+ await page.evaluate(()=>{document.querySelector('attachment-item').shadowRoot.innerHTML='<div class="attach-item" attachment-type="1"><div class="attach-info"><h1>签到说明.pdf</h1><p>10-25 14:24</p></div></div>'});
+ const unsupported=await page.evaluate(()=>CourseInboxChaoxing.extractDocument(document));assert.equal(unsupported.length,0,'a file name is not a sign-in card');
+ await collector.close();console.log('PASS: actual Shadow DOM activity shape, own publication time, change trigger, unsupported file boundary');
+})().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>browser?.close());

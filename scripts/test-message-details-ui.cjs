@@ -1,0 +1,56 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('fs'),path=require('path');
+const {chromium}=require('playwright'),{createHmac}=require('crypto');
+const {createTestServer}=require('./lib/browser-test-server.cjs');
+const testServer=createTestServer('courseinbox-message-details-');
+const {root}=testServer;
+const output=path.join(root,'artifacts/message-details-20261023');fs.mkdirSync(output,{recursive:true});
+let browser;
+(async()=>{
+ const {url,token,api:request}=await testServer.start();
+ const api=(endpoint,body)=>request(endpoint,body,undefined,endpoint==='chaoxing/messages'?createHmac('sha256',token).update('courseinbox:chaoxing-web:v1').digest('hex'):token);
+ await api('chaoxing/messages',{kind:'task_center',message_id:'message-detail-fixture',title:'实验三',text:'完成实验报告，并提交源代码。',course:'软件工程',conversation:'一班',captured_at:'2026-10-23T09:00:00+08:00',task_type:'assignment',deadline:'2026-11-20T18:00:00+08:00',url:'https://mooc1.chaoxing.com/mooc2/work/detail?courseId=1&classId=2&workId=43',field_evidence:{title:'实验三',deadline:'截止2026-11-20 18:00'},detail_state:'read',attachments:[{name:'实验要求.txt',url:'https://d0.cldisk.com/download/'+'a'.repeat(32),status:'partial',text:'只读第2页。<img src=x onerror=alert(1)>',error:'后续页面尚未读取'}]});
+ const initial=await api('state'),original={message:initial.messages.find(m=>m.external?.message_id==='message-detail-fixture'),proposals:initial.proposals};
+ const second=await api('messages',{text:'《第二课程》第二次作业，请提交报告。',captured_at:'2026-10-23T10:00:00+08:00'});
+ browser=await chromium.launch({channel:'msedge',headless:true});const page=await browser.newPage({viewport:{width:1440,height:1080},reducedMotion:'reduce'});page.setDefaultTimeout(7000);
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(url+'/?message='+original.message.id+'#inbox');await page.locator('#messageDialog').waitFor({state:'visible'});
+ await page.locator('#messageAttachments').getByText('实验要求.txt',{exact:true}).waitFor();
+ assert.match(await page.locator('#messageReadStatus').textContent(),/附件.*核对|部分/);
+ await page.locator('#messageAttachments summary').click();assert.match(await page.locator('#messageAttachments pre').textContent(),/只读第2页/);assert.equal(await page.locator('#messageAttachments img').count(),0);
+ assert.equal(await page.locator('#messageDetailText').textContent(),original.message.text);
+ await page.locator('#messageRelated').getByRole('button',{name:'核对草稿',exact:true}).click();await page.locator('.proposal-card[data-proposal="'+original.proposals[0].id+'"]').waitFor();assert.equal(await page.locator('#messageDialog').isVisible(),false);
+ const confirmed=await api('proposals/'+original.proposals[0].id+'/confirm',{});
+ await page.locator('[data-inbox-tab="messages"]').click();await page.locator('.message-card [data-message-detail="'+original.message.id+'"]').click();
+ await page.locator('#messageRelated [data-detail="'+confirmed.id+'"]').waitFor();await page.locator('#messageRelated [data-detail]').click();await page.locator('#taskDialog').waitFor({state:'visible'});assert.equal(await page.locator('#messageDialog').isVisible(),false);await page.locator('#taskDialog summary').filter({hasText:'消息来源'}).click();await page.locator('#taskDialog [data-message-detail="'+original.message.id+'"]').click();await page.locator('#messageDialog').waitFor({state:'visible'});assert.equal(await page.locator('#taskDialog').isVisible(),false);await page.locator('#messageDialog [data-close]').click();
+ let releaseTask,observeTask;const taskHeld=new Promise(resolve=>{releaseTask=resolve}),taskSeen=new Promise(resolve=>{observeTask=resolve});
+ await page.route('**/api/tasks/'+confirmed.id,async route=>{const response=await route.fetch();observeTask();await taskHeld;await route.fulfill({response})});
+ await page.locator('.message-card [data-message-detail="'+original.message.id+'"]').click();await page.locator('#messageRelated [data-detail]').click();await taskSeen;
+ await page.locator('.message-card [data-message-detail="'+second.message.id+'"]').click();await page.locator('#messageDetailText').filter({hasText:'第二课程'}).waitFor();
+ const taskDone=page.waitForResponse(r=>r.url().endsWith('/api/tasks/'+confirmed.id));releaseTask();await (await taskDone).finished();await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));assert.equal(await page.locator('#taskDialog').isVisible(),false);assert.equal(await page.locator('#messageDialog').isVisible(),true);
+ await page.locator('#messageDialog [data-close]').click();await page.unroute('**/api/tasks/'+confirmed.id);
+ // Read fresh API data even when the inbox cache still has the original text.
+ let latest='最新保存的原文\n特殊文字 <script>window.bad=1</script>';
+ await page.route('**/api/messages/'+original.message.id,async route=>{const response=await route.fetch();const body=await response.json();body.text=latest;body.external.url='javascript:alert(1)';return route.fulfill({json:body})});
+ await page.locator('.message-card [data-message-detail="'+original.message.id+'"]').click();await page.locator('#messageDetailText').filter({hasText:'最新保存的原文'}).waitFor();
+ assert.equal(await page.locator('#messageDetail a[href^="javascript:"]').count(),0);assert.equal(await page.evaluate(()=>window.bad),undefined);
+ await page.context().grantPermissions(['clipboard-read','clipboard-write']);await page.locator('#messageCopy').click();assert.equal((await page.evaluate(()=>navigator.clipboard.readText())).replace(/\r\n/g,'\n'),latest);
+ latest='再次更新的正文';await page.locator('#messageRefresh').click();await page.locator('#messageDetailText').filter({hasText:latest}).waitFor();
+ for(const width of [1440,390,320]){await page.setViewportSize({width,height:1000});const dimensions=await page.locator('#messageDialog').evaluate(e=>({client:e.clientWidth,scroll:e.scrollWidth}));assert(dimensions.scroll<=dimensions.client+1);if(width!==320)await page.screenshot({path:path.join(output,'details-'+width+'.png'),fullPage:true})}
+ await page.locator('#messageDialog [data-close]').click();await page.unroute('**/api/messages/'+original.message.id);
+ // A late response must not replace a different message or reopen a closed modal.
+ let release,observed;const held=new Promise(resolve=>{release=resolve}),seen=new Promise(resolve=>{observed=resolve});
+ await page.route('**/api/messages/'+original.message.id,async route=>{const response=await route.fetch();observed();await held;await route.fulfill({response})});
+ await page.locator('.message-card [data-message-detail="'+original.message.id+'"]').click();await seen;await page.locator('#messageDialog [data-close]').click();
+ await page.locator('.message-card [data-message-detail="'+second.message.id+'"]').click();await page.locator('#messageDetailText').filter({hasText:'第二课程'}).waitFor();
+ const done=page.waitForResponse(r=>r.url().endsWith('/api/messages/'+original.message.id));release();await (await done).finished();await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));assert.match(await page.locator('#messageDetailText').textContent(),/第二课程/);
+ await page.locator('#messageDialog [data-close]').click();await page.unroute('**/api/messages/'+original.message.id);
+ await page.route('**/api/messages/'+original.message.id,r=>r.fulfill({status:404,json:{error:'消息不存在或已清理。'}}));
+ await page.locator('.message-card [data-message-detail="'+original.message.id+'"]').click();await page.locator('#messageDetail [role="alert"]').waitFor();assert.equal(await page.locator('#messageDetailText').count(),0);await page.locator('#messageDialog [data-close]').click();await page.unroute('**/api/messages/'+original.message.id);
+ const empty=await api('messages',{text:'您有一条新消息\n请点击查看',source:'Android · com.chaoxing.mobile',captured_at:'2026-10-23T09:00:00+08:00'});
+ await page.goto(url+'/?message='+empty.message.id+'#inbox');await page.locator('#messageReadStatus').filter({hasText:'正文尚未接收'}).waitFor();assert.equal(await page.locator('#messageDetailText').textContent(),empty.message.text);
+ const partial=await api('messages/'+original.message.id+'/supplements',{text:'请同时提交演示文稿。',target:'task:'+confirmed.id,filename:'部分.pdf',file_partial:true});
+ await page.goto(url+'/?message='+partial.message.id+'#inbox');await page.locator('#messageReadStatus').filter({hasText:'补充文件仅读取部分文字'}).waitFor();assert.equal(await page.locator('#messageReadStatus.needs-review').count(),1);
+ assert.deepEqual(errors,[]);assert.equal((await api('tasks')).length,1);
+ console.log('PASS message details: task attachments, partial status, original evidence, pending/confirmed navigation, fresh reads, copy/refresh, stale response, missing source, escaping/URLs, 320/390/1440px');
+})().catch(e=>{console.error(e);process.exitCode=1}).finally(async()=>{try{await browser?.close()}finally{await testServer.close()}});

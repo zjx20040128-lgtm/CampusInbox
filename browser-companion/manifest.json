@@ -1,0 +1,60 @@
+{
+  "manifest_version": 3,
+  "name": "CampusInbox 学习通网页同步",
+  "version": "0.3.2",
+  "description": "同步学习通网页聊天、课程通知及作业考试中心任务到本机 CampusInbox。",
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8765/*",
+    "https://d0.cldisk.com/download/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_popup": "options.html",
+    "default_title": "CampusInbox 网页同步"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://fe.chaoxing.com/front/webim/*"
+      ],
+      "js": [
+        "parser.js",
+        "content.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://notice.chaoxing.com/pc/notice/myNotice*",
+        "https://notice.chaoxing.com/pc/notice/*/detail*"
+      ],
+      "js": [
+        "parser.js",
+        "notices.js",
+        "content.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://mooc1.chaoxing.com/*",
+        "https://mooc2-ans.chaoxing.com/*"
+      ],
+      "js": [
+        "tasks.js",
+        "task-content.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ]
+}

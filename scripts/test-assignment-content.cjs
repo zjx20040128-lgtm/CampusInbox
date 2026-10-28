@@ -1,0 +1,43 @@
+'use strict';
+const assert=require('node:assert/strict'),{chromium}=require('playwright');
+const {TaskCenterCollector}=require('../desktop-sync/task-center.cjs');
+const parser=require('../browser-companion/tasks.js');
+const job={kind:'task_center',message_id:'task_test',title:'实验报告',text:'实验报告；剩余12小时；未交',course:'数据库',conversation:'一班',task_type:'assignment',url:'https://mooc1.chaoxing.com/mooc-ans/mooc2/work/task?courseId=1&classId=2&workId=42&answerId=7',deadline:null,field_evidence:{title:'实验报告'}};
+const html=`<input id="courseId" value="1"><input id="classId" value="2"><input id="workRelationId" value="42"><main class="fanyaMarking"><div class="detailsHead"><h2 class="mark_title">实验报告</h2><div class="infoHead"><p>作答时间:<em>2026-10-23 23:35</em>至<em>2026-10-28 23:35</em></p></div></div><div class="mark_table"><h3 class="mark_name">1. <span>(简答题)</span><p>提交PDF报告与源码，比较算法结果。</p></h3><div class="stem_answer"><textarea>我的私人草稿</textarea></div><div class="mark_answer">我的答案：已交内容</div></div></main><form action="https://mooc1.chaoxing.com/save" method="post"><input name="answer" value="私人答案"></form><img src="https://mooc1.chaoxing.com/save"><script>fetch('https://mooc1.chaoxing.com/submit',{method:'POST'});window.unsafeScriptRan=true</script>`;
+(async()=>{
+ assert.equal(typeof parser.assignmentContentUrl,'function','assignment HTML reader must validate its own request URLs');
+ assert.ok(parser.assignmentContentUrl(job));
+ assert.equal(parser.assignmentContentUrl({...job,task_type:'exam'}),'');
+ assert.equal(parser.assignmentContentUrl({...job,url:job.url+'&submit=1'}),'');
+ const b=await chromium.launch({channel:'msedge',headless:true});
+ try{
+  const c=await b.newContext();let calls=[],wrong=false,loop=false,shape=html,resourceRequests=0,responses=0,writes=0;
+  c.on('request',r=>{resourceRequests++;if(r.method()!=='GET')writes++});c.on('response',()=>responses++);
+  const response=(url,status,body='',location='')=>({status:()=>status,url:()=>url,headers:()=>({'content-type':'text/html',...(location?{location}:{})}),text:async()=>body,body:async()=>Buffer.from(body),dispose:async()=>{}});
+  const wrapper={newPage:()=>c.newPage(),newCDPSession:p=>c.newCDPSession(p),request:{get:async(url,options)=>{calls.push(url);assert.equal(options.maxRedirects,0);const u=new URL(url);if(u.pathname.endsWith('/task'))return response(url,302,'',loop?job.url:url.replace('/task?','/dowork?').replace('workId=42',wrong?'workId=99':'workId=42'));return response(url,200,shape)}}};
+  const collector=new TaskCenterCollector({context:wrapper,accepted:new Set(),isCurrent:()=>true,onMessage:()=>{},onStatus:()=>{}});
+  let result=await collector.detail(job);
+  assert.equal(result.detail_state,'read');assert.equal(result.deadline,'2026-10-28T23:35:00+08:00');assert.equal(result.published_at,null,'start of answer window is not notification publication');
+  assert.match(result.description,/PDF报告/);assert.doesNotMatch(result.text,/私人|已交内容|暂时保存|提交表单/);assert.equal(result.url,job.url);assert.equal(result.detail_url,undefined,'do not label an answer page as a read-only browser link');
+  assert.equal(calls.length,2);assert.equal(writes,0,'page scripts must never execute');assert.equal(responses,0,'all attempted image/resource loads must be blocked');assert.ok(resourceRequests<=1,'scripts cannot issue additional requests');
+  shape=html;calls=[];
+  const fallbackPage={route:async()=>{},goto:async()=>{throw Error('fixture read-only detail failed')},close:async()=>{}};
+  const fallback=new TaskCenterCollector({context:{...wrapper,newPage:async()=>fallbackPage,newCDPSession:async()=>({send:async()=>{}})},accepted:new Set(),isCurrent:()=>true,onMessage:()=>{},onStatus:()=>{}});
+  fallback.assignmentContent=async input=>{assert.equal(input.url,job.url);return {...input,detail_state:'read',deadline:'2026-10-28T23:35:00+08:00'}};
+  result=await fallback.detail({...job,detail_url:'https://mooc1.chaoxing.com/mooc2/work/detail?courseId=1&classId=2&workId=42'});
+  assert.equal(result.detail_state,'read','failed read-only detail falls back to validated static assignment content');
+  shape=html.replaceAll('2026-','');calls=[];result=await collector.detail(job);
+  assert.equal(result.deadline,null,'missing year must not be silently inferred from scan date');assert.match(result.field_evidence.deadline,/10-28 23:35/);assert.match(result.detail_error,/年份/);
+  shape=html.replace('class="mark_name"','class="mark_name" aria-hidden="true"');assert.equal((await collector.detail(job)).detail_state,'read','official visible question stems use aria-hidden for accessibility duplicates');
+  shape=html.replace('class="mark_name"','class="mark_name" hidden');assert.equal((await collector.detail(job)).detail_state,'unavailable','actually hidden stems cannot supply requirements');
+  shape=html.replace('实验报告</h2>','别的作业</h2>');assert.equal((await collector.detail(job)).detail_state,'unavailable');
+  shape=html.replace('id="classId" value="2"','id="classId" value="99"');assert.equal((await collector.detail(job)).detail_state,'unavailable');
+  shape=html.replace(/<h3 class="mark_name">[\s\S]*?<\/h3>/,'');assert.equal((await collector.detail(job)).detail_state,'unavailable','answer-only shell cannot count as requirements');
+  shape=html.replace('比较算法结果。','比较算法结果。<img src="https://example.invalid/unsupported.png"><div class="attachNew"><span name="data.zip">data.zip</span></div>');result=await collector.detail(job);assert.equal(result.media_pending_count,2);assert.match(result.text,/data.zip/);
+  shape=html.replace('比较算法结果。','比较算法结果。<img src="https://p.ananas.chaoxing.com/test/requirements.png">');result=await collector.detail(job);assert.equal(result.media_pending_count,0);assert.equal(result.attachments[0].kind,'inline_image','supported requirement images enter the existing OCR pipeline');
+  wrong=true;calls=[];assert.equal((await collector.detail(job)).detail_state,'unavailable');assert.equal(calls.length,1,'never follow a redirect into a different task');wrong=false;
+  loop=true;calls=[];assert.equal((await collector.detail(job)).detail_state,'unavailable');assert.ok(calls.length<=4,'redirect loops are bounded');loop=false;
+  calls=[];assert.equal((await collector.detail({...job,task_type:'exam'})).detail_state,'skipped');assert.equal(calls.length,0);
+  await c.close();console.log('PASS assignment static HTML, requirements, time evidence, media gaps, no scripts/writes, identity and bounded redirects');
+ }finally{await b.close()}
+})().catch(e=>{console.error(e);process.exitCode=1});

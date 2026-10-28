@@ -1,0 +1,3 @@
+package android.app;
+import android.content.*;
+public class PendingIntent {public static final int FLAG_UPDATE_CURRENT=0x08000000,FLAG_IMMUTABLE=0x04000000;public final Intent intent;public final int flags;public final boolean service;private PendingIntent(Intent intent,int flags,boolean service){this.intent=intent;this.flags=flags;this.service=service;}public static PendingIntent getActivity(Context c,int request,Intent intent,int flags){return new PendingIntent(intent,flags,false);}public static PendingIntent getService(Context c,int request,Intent intent,int flags){return new PendingIntent(intent,flags,true);}}

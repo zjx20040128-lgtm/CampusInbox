@@ -1,0 +1,42 @@
+plugins { id 'com.android.application' }
+def ciArchitecture = (project.findProperty('ciArchitecture') ?: 'arm').toLowerCase(java.util.Locale.ROOT)
+def ciAbis = [arm:['armeabi-v7a','arm64-v8a'], arm64:['arm64-v8a'], universal:['armeabi-v7a','arm64-v8a','x86','x86_64']]
+if (!ciAbis.containsKey(ciArchitecture)) { throw new GradleException('ciArchitecture must be arm, arm64 or universal') }
+android {
+    namespace 'cn.courseinbox.companion'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'cn.courseinbox.companion'
+        minSdk 26
+        targetSdk 35
+        versionCode 29
+        versionName '0.3.21'
+        ndk { abiFilters.addAll(ciAbis[ciArchitecture]) }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    signingConfigs {
+        debug {
+            if (project.hasProperty('ciDebugKeystore')) {
+                storeFile file(project.property('ciDebugKeystore'))
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
+        }
+    }
+    sourceSets { main { assets.srcDir layout.buildDirectory.dir('generated/learningAssets') } }
+}
+
+dependencies {
+    // Bundled Chinese OCR works on the phone without a model download.
+    implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'
+}
+
+tasks.register('prepareLearningAssets', Sync) {
+    from('../../browser-companion') { include 'parser.js', 'notices.js' }
+    into(layout.buildDirectory.dir('generated/learningAssets'))
+}
+tasks.named('preBuild').configure { dependsOn 'prepareLearningAssets' }

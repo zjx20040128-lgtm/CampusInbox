@@ -1,0 +1,25 @@
+'use strict';
+const assert=require('node:assert/strict'),{chromium}=require('playwright');
+const {createTestServer}=require('./lib/browser-test-server.cjs');
+const testServer=createTestServer('campusinbox-deadline-ref-');
+let browser;
+(async()=>{
+ const {url,token,api:request}=await testServer.start();
+ const webToken=require('crypto').createHmac('sha256',token).update('courseinbox:chaoxing-web:v1').digest('hex');
+ const api=(p,body)=>request(p,body,undefined,p==='chaoxing/messages'?webToken:token);
+ const course='软件工程高级管理技术',title='AI对进度管理的影响';
+ const n=await api('chaoxing/messages',{kind:'course_notice',message_id:'notice_ref',title:`作业:《${course}》${title}`,text:`课程名称：${course}\n作业名称：${title}\n开始时间：2026-10-23 23:35\n结束时间：2026-10-28 23:35`,course,conversation:course,captured_at:'2026-10-23T23:36:00+08:00',url:'https://notice.chaoxing.com/pc/notice/ref/detail',attachments:[]});
+ const noticeDraft=(await api('state')).proposals[0];await api('proposals/'+noticeDraft.id+'/dismiss',{});
+ const d=await api('chaoxing/messages',{kind:'task_center',message_id:'task_ref',title,text:title,description:'完成报告',course,conversation:course,captured_at:'2026-10-24T10:54:00+08:00',task_type:'assignment',deadline:null,platform_status:'未交',url:'https://mooc1.chaoxing.com/mooc2/work/task?courseId=1&classId=2&workId=3',detail_state:'read',field_evidence:{title}});
+ const taskDraft=(await api('state')).proposals[0];
+ browser=await chromium.launch({channel:'msedge',headless:true});const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(url+'/#inbox');await page.locator('[data-proposal="'+taskDraft.id+'"] .deadline-references').waitFor();
+ assert.match(await page.locator('.deadline-references').first().textContent(),/2026[.-]10[.-]28 23:35/);
+ const task=await api('proposals/'+taskDraft.id+'/confirm',{});
+ await page.goto(url+'/#tasks');await page.reload();await page.locator('[data-detail="'+task.id+'"]').click();await page.locator('#taskDetail .deadline-references').waitFor();
+ assert.match(await page.locator('#taskDetail .deadline-references').innerText(),/已忽略通知/);
+ assert.equal((await api('tasks/'+task.id)).deadline,null,'hints cannot silently adopt an ignored deadline');
+ await page.locator('#taskDetail .deadline-references [data-message-detail]').click();await page.locator('#messageDialog').waitFor({state:'visible'});
+ assert.match(await page.locator('#messageDetailText').textContent(),/结束时间：2026-10-28 23:35/);assert.deepEqual(errors,[]);
+ console.log('PASS deadline hints before confirmation and in task details, original notice link, no automatic adoption');
+})().catch(e=>{console.error(e);process.exitCode=1}).finally(async()=>{try{await browser?.close()}finally{await testServer.close()}});
